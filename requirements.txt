@@ -1,0 +1,7 @@
+﻿fastapi
+uvicorn
+python-multipart
+requests
+pydantic
+PyPDF2
+openai
