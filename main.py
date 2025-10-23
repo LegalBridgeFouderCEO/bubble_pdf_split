@@ -1,40 +1,71 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from pdf_routes import router as pdf_router  
+from fastapi import FastAPI, Request
+import requests
+from io import BytesIO
+import pdfplumber
+import openai
+import os
 
-def analyse_text(text):
-    return f"Texte reçu : {text[:50]}..."
+app = FastAPI()
 
-def clean_text(text):
+openai.api_key = os.getenv("OPENAI_API_KEY")
+
+def extract_text_from_pdf(url: str) -> str:
+    """Télécharge le PDF et extrait le texte."""
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+    except Exception as e:
+        raise ValueError(f"Failed to download PDF: {str(e)}")
+
+    pdf_file = BytesIO(response.content)
+    text = ""
+    try:
+        with pdfplumber.open(pdf_file) as pdf:
+            for page in pdf.pages:
+                page_text = page.extract_text() or ""
+                text += page_text + "\n"
+    except Exception as e:
+        raise ValueError(f"PDF reading failed: {str(e)}")
+
     return text.strip()
 
-app = FastAPI(
-    title="LegalBridge PDF Analysis API",
-    description="API pour diviser les PDFs en chunks et les analyser avec LangChain et OpenAI GPT-5",
-    version="1.0.0"
-)
+@app.post("/analyze-pdf")
+async def analyze_pdf(request: Request):
+    try:
+        data = await request.json()
+        file_url = data.get("file_url")
+        if not file_url:
+            return {"error": "No file_url provided"}
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+        print("Received file_url:", file_url)
 
-app.include_router(pdf_router, prefix="/api", tags=["PDF Analysis"])
+        # Extraction du texte
+        try:
+            text_from_pdf = extract_text_from_pdf(file_url)
+        except ValueError as e:
+            return {"error": str(e)}
 
-@app.get("/")
-async def root():
-    return {
-        "message": "LegalBridge PDF Analysis API",
-        "version": "1.0.0",
-        "endpoints": {
-            "analyze_pdf": "/api/analyze-pdf"
-        }
-    }
+        if not text_from_pdf:
+            return {"error": "No text extracted from PDF"}
 
-@app.get("/health")
-async def health():
-    return {"status": "healthy"}
+        print("Extracted text length:", len(text_from_pdf))
+
+        # Appel OpenAI
+        try:
+            response = openai.ChatCompletion.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": "Tu es un assistant juridique."},
+                    {"role": "user", "content": text_from_pdf}
+                ],
+                max_tokens=1000
+            )
+            ai_result = response['choices'][0]['message']['content']
+        except Exception as e:
+            return {"error": f"OpenAI call failed: {str(e)}"}
+
+        return {"pdf_text": text_from_pdf, "openai_analysis": ai_result}
+
+    except Exception as e:
+        return {"error": f"Unexpected server error: {str(e)}"}
 
