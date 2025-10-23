@@ -5,3 +5,5 @@ requests
 pydantic
 PyPDF2
 openai
+pdfplumber
+
