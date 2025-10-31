@@ -1,4 +1,5 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
+from pydantic import BaseModel
 import requests
 from io import BytesIO
 import pdfplumber
@@ -9,63 +10,48 @@ app = FastAPI()
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
+# ✅ Définition du schéma d’entrée
+class PDFRequest(BaseModel):
+    file_url: str
+
 def extract_text_from_pdf(url: str) -> str:
     """Télécharge le PDF et extrait le texte."""
-    try:
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-    except Exception as e:
-        raise ValueError(f"Failed to download PDF: {str(e)}")
-
+    response = requests.get(url, timeout=10)
+    response.raise_for_status()
     pdf_file = BytesIO(response.content)
-    text = ""
-    try:
-        with pdfplumber.open(pdf_file) as pdf:
-            for page in pdf.pages:
-                page_text = page.extract_text() or ""
-                text += page_text + "\n"
-    except Exception as e:
-        raise ValueError(f"PDF reading failed: {str(e)}")
 
+    text = ""
+    with pdfplumber.open(pdf_file) as pdf:
+        for page in pdf.pages:
+            text += (page.extract_text() or "") + "\n"
     return text.strip()
 
+@app.get("/")
+async def root():
+    return {"message": "API LegalBridge en ligne 🚀"}
+
+# ✅ Le endpoint déclare maintenant qu’il attend un JSON conforme à PDFRequest
 @app.post("/analyze-pdf")
-async def analyze_pdf(request: Request):
+async def analyze_pdf(request_data: PDFRequest):
+    file_url = request_data.file_url
+    if not file_url:
+        return {"error": "Aucune URL de fichier fournie."}
+
+    text = extract_text_from_pdf(file_url)
+    if not text:
+        return {"error": "Aucun texte extrait du PDF."}
+
     try:
-        data = await request.json()
-        file_url = data.get("file_url")
-        if not file_url:
-            return {"error": "No file_url provided"}
-
-        print("Received file_url:", file_url)
-
-        # Extraction du texte
-        try:
-            text_from_pdf = extract_text_from_pdf(file_url)
-        except ValueError as e:
-            return {"error": str(e)}
-
-        if not text_from_pdf:
-            return {"error": "No text extracted from PDF"}
-
-        print("Extracted text length:", len(text_from_pdf))
-
-        # Appel OpenAI
-        try:
-            response = openai.ChatCompletion.create(
-                model="gpt-4",
-                messages=[
-                    {"role": "system", "content": "Tu es un assistant juridique."},
-                    {"role": "user", "content": text_from_pdf}
-                ],
-                max_tokens=1000
-            )
-            ai_result = response['choices'][0]['message']['content']
-        except Exception as e:
-            return {"error": f"OpenAI call failed: {str(e)}"}
-
-        return {"pdf_text": text_from_pdf, "openai_analysis": ai_result}
-
+        response = openai.ChatCompletion.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "Tu es un assistant juridique spécialisé en analyse contractuelle."},
+                {"role": "user", "content": f"Analyse ce contrat :\n\n{text}"}
+            ],
+            max_tokens=800
+        )
+        ai_result = response["choices"][0]["message"]["content"]
     except Exception as e:
-        return {"error": f"Unexpected server error: {str(e)}"}
+        ai_result = f"Erreur d'appel OpenAI : {e}"
 
+    return {"pdf_text": text[:1000], "openai_analysis": ai_result}
