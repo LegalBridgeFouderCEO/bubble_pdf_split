@@ -4,7 +4,7 @@ import pdfplumber
 import openai
 import os
 
-app = FastAPI()
+app = FastAPI(title="LegalBridge PDF Analysis API")
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
