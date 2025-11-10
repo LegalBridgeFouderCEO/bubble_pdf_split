@@ -5,6 +5,11 @@ from io import BytesIO
 import pdfplumber
 from openai import OpenAI
 import os
+import logging
+
+# Configuration du logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
@@ -16,15 +21,27 @@ class PDFRequest(BaseModel):
 
 def extract_text_from_pdf(url: str) -> str:
     """Télécharge le PDF et extrait le texte."""
-    response = requests.get(url, timeout=10)
+    # ✅ FIX: Gérer les URLs relatives de Bubble
+    if url.startswith("//"):
+        url = "https:" + url
+        logger.info(f"🔧 URL relative corrigée : {url}")
+    
+    logger.info(f"📥 Téléchargement du PDF depuis : {url}")
+    response = requests.get(url, timeout=30)
     response.raise_for_status()
     pdf_file = BytesIO(response.content)
+    logger.info(f"✅ PDF téléchargé : {len(response.content)} bytes")
 
     text = ""
     with pdfplumber.open(pdf_file) as pdf:
+        logger.info(f"📖 Nombre de pages détectées : {len(pdf.pages)}")
         for page in pdf.pages:
-            text += (page.extract_text() or "") + "\n"
-    return text.strip()
+            page_text = page.extract_text() or ""
+            text += page_text + "\n"
+    
+    text = text.strip()
+    logger.info(f"✅ Extraction terminée : {len(text)} caractères extraits")
+    return text
 
 @app.get("/")
 async def root():
@@ -32,15 +49,27 @@ async def root():
 
 @app.post("/analyze-pdf")
 async def analyze_pdf(request_data: PDFRequest):
+    logger.info("🚀 Nouvelle requête d'analyse PDF")
+    
     file_url = request_data.file_url
     if not file_url:
+        logger.error("❌ Aucune URL de fichier fournie")
         return {"error": "Aucune URL de fichier fournie."}
+    
+    logger.info(f"🔗 URL reçue : {file_url}")
 
-    text = extract_text_from_pdf(file_url)
+    try:
+        text = extract_text_from_pdf(file_url)
+    except Exception as e:
+        logger.error(f"❌ Erreur lors de l'extraction du PDF : {e}")
+        return {"error": f"Erreur lors de l'extraction du PDF : {str(e)}"}
+
     if not text:
+        logger.warning("⚠️ Aucun texte extrait du PDF")
         return {"error": "Aucun texte extrait du PDF."}
 
     try:
+        logger.info("🤖 Appel OpenAI pour l'analyse...")
         # ✅ nouvelle syntaxe OpenAI 1.x
         response = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -51,8 +80,9 @@ async def analyze_pdf(request_data: PDFRequest):
             max_tokens=800
         )
         ai_result = response.choices[0].message.content
+        logger.info(f"✅ Analyse OpenAI réussie : {len(ai_result)} caractères")
     except Exception as e:
+        logger.error(f"❌ Erreur d'appel OpenAI : {e}")
         ai_result = f"Erreur d'appel OpenAI : {e}"
 
     return {"pdf_text": text[:1000], "openai_analysis": ai_result}
-
