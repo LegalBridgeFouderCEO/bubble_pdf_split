@@ -1,20 +1,21 @@
-# Étape 1 : image de base Python 3.11
+# Dockerfile pour LegalBridge FastAPI sur Render
+
+# 1️⃣ Image Python officielle
 FROM python:3.11-slim
 
-# Définir le dossier de travail
+# 2️⃣ Définir le dossier de travail dans le conteneur
 WORKDIR /app
 
-# Copier les fichiers requirements.txt et main.py
+# 3️⃣ Copier les fichiers requirements.txt et installer les dépendances
 COPY requirements.txt .
-COPY main.py .
-
-# Installer les dépendances
-RUN pip install --no-cache-dir --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Exposer le port utilisé par uvicorn
+# 4️⃣ Copier tout le code de ton projet
+COPY . .
+
+# 5️⃣ Exposer le port utilisé par Render
 EXPOSE 10000
 
-# Commande pour lancer ton app FastAPI
+# 6️⃣ Commande pour lancer FastAPI avec uvicorn
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "10000"]
 
