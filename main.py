@@ -6,6 +6,7 @@ import pdfplumber
 from openai import OpenAI
 import os
 import logging
+import re
 
 # Configuration du logging
 logging.basicConfig(level=logging.INFO)
@@ -13,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-# ✅ nouvelle syntaxe
+# ✅ nouvelle syntaxe OpenAI
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 class PDFRequest(BaseModel):
@@ -79,10 +80,19 @@ async def analyze_pdf(request_data: PDFRequest):
             ],
             max_tokens=800
         )
-        ai_result = response.choices[0].message.content
-        logger.info(f"✅ Analyse OpenAI réussie : {len(ai_result)} caractères")
+        ai_result_raw = response.choices[0].message.content
+        logger.info(f"✅ Analyse OpenAI réussie : {len(ai_result_raw)} caractères")
+
+        # Nettoyage pour Bubble : enlever sauts de ligne et extraire les points numérotés
+        ai_result_clean = ai_result_raw.replace("\n", " ").replace("  ", " ")
+        points = re.findall(r"\d+\.\s(.+?)(?=\d+\.|$)", ai_result_clean)
+
     except Exception as e:
         logger.error(f"❌ Erreur d'appel OpenAI : {e}")
-        ai_result = f"Erreur d'appel OpenAI : {e}"
+        points = [f"Erreur d'appel OpenAI : {e}"]
 
-    return {"pdf_text": text[:1000], "openai_analysis": ai_result}
+    return {
+        "pdf_text": text[:1000],  # renvoie seulement un aperçu pour Bubble
+        "openai_analysis_points": points
+    }
+
