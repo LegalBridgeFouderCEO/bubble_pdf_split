@@ -6,7 +6,6 @@ import pdfplumber
 from openai import OpenAI
 import os
 import logging
-import re
 
 # Configuration du logging
 logging.basicConfig(level=logging.INFO)
@@ -14,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-# ✅ nouvelle syntaxe OpenAI
+# ✅ Nouvelle syntaxe OpenAI
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 class PDFRequest(BaseModel):
@@ -22,7 +21,8 @@ class PDFRequest(BaseModel):
 
 def extract_text_from_pdf(url: str) -> str:
     """Télécharge le PDF et extrait le texte."""
-    # ✅ FIX: Gérer les URLs relatives de Bubble
+    
+    # ✅ Corriger les URLs Bubble
     if url.startswith("//"):
         url = "https:" + url
         logger.info(f"🔧 URL relative corrigée : {url}")
@@ -39,7 +39,7 @@ def extract_text_from_pdf(url: str) -> str:
         for page in pdf.pages:
             page_text = page.extract_text() or ""
             text += page_text + "\n"
-    
+
     text = text.strip()
     logger.info(f"✅ Extraction terminée : {len(text)} caractères extraits")
     return text
@@ -69,30 +69,55 @@ async def analyze_pdf(request_data: PDFRequest):
         logger.warning("⚠️ Aucun texte extrait du PDF")
         return {"error": "Aucun texte extrait du PDF."}
 
+    # ✅ Appel à OpenAI
     try:
         logger.info("🤖 Appel OpenAI pour l'analyse...")
-        # ✅ nouvelle syntaxe OpenAI 1.x
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "Tu es un assistant juridique spécialisé en analyse contractuelle."},
-                {"role": "user", "content": f"Analyse ce contrat et identifie les points de vigilance :\n\n{text}"}
+                {
+                    "role": "system",
+                    "content": (
+                        "Tu es un expert en droit du travail. "
+                        "Analyse le contrat et produis un rapport structuré PRO, clair et lisible, avec paragraphes séparés, titres et puces. "
+                        "Mets en évidence les points de vigilance et les risques, avec une évaluation du risque (faible / moyen / élevé). "
+                        "Structure ton analyse ainsi : "
+                        "\n\n1. Contexte général\n"
+                        "2. Points de vigilance (liste à puces + niveau de risque)\n"
+                        "3. Risques juridiques potentiels (par paragraphes)\n"
+                        "4. Recommandations pratiques\n"
+                        "\n"
+                        "Utilise des paragraphes, pas de \\n inutiles. "
+                        "Ajoute des sauts de ligne doubles entre les sections."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": f"Voici le texte du contrat à analyser : {text}"
+                }
             ],
-            max_tokens=800
+            max_tokens=1200
         )
-        ai_result_raw = response.choices[0].message.content
-        logger.info(f"✅ Analyse OpenAI réussie : {len(ai_result_raw)} caractères")
+        
+        ai_result = response.choices[0].message.content
 
-        # Nettoyage pour Bubble : enlever sauts de ligne et extraire les points numérotés
-        ai_result_clean = ai_result_raw.replace("\n", " ").replace("  ", " ")
-        points = re.findall(r"\d+\.\s(.+?)(?=\d+\.|$)", ai_result_clean)
+        # ✅ Nettoyer les doublons de retours à la ligne
+        # Conserver les paragraphes propres
+        ai_result = ai_result.replace("\r", "")
+        # Supprimer les triples, quadruples newlines
+        while "\n\n\n" in ai_result:
+            ai_result = ai_result.replace("\n\n\n", "\n\n")
 
+        ai_result = ai_result.strip()
+
+        logger.info(f"✅ Analyse OpenAI réussie : {len(ai_result)} caractères")
     except Exception as e:
         logger.error(f"❌ Erreur d'appel OpenAI : {e}")
-        points = [f"Erreur d'appel OpenAI : {e}"]
+        ai_result = f"Erreur d'appel OpenAI : {e}"
 
     return {
-        "pdf_text": text[:1000],  # renvoie seulement un aperçu pour Bubble
-        "openai_analysis_points": points
+        "pdf_text": text[:1500],
+        "openai_analysis": ai_result
     }
+
 
