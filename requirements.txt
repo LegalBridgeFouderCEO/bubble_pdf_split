@@ -4,7 +4,6 @@ pydantic
 uvicorn
 python-multipart
 pdfplumber
-fpdf2
 requests
 httpx
 Pillow
